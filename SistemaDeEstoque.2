@@ -1,167 +1,167 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
 
-# ====================================================
-# SISTEMA DE CONTROLE DE ESTOQUE (VISUAL E COM BAIXA)
-# ====================================================
+# ==========================================================
+# SISTEMA DE CONTROLE DE ESTOQUE COMPLETO
+# - Cadastro de produtos
+# - Consulta e pesquisa
+# - Relatório de estoque baixo
+# ==========================================================
 
-estoque = []  # Lista de produtos armazenados
-
-
-# ----------------------------------------------------
-# FUNÇÃO: Adicionar produto
-# ----------------------------------------------------
-def adicionar_produto():
-    nome = entrada_nome.get().strip()
-    quantidade = entrada_quantidade.get().strip()
-
-    if nome == "" or quantidade == "":
-        messagebox.showwarning("⚠️ Atenção", "Preencha todos os campos!")
-        return
-
-    try:
-        quantidade = int(quantidade)
-    except ValueError:
-        messagebox.showwarning("Erro", "A quantidade deve ser um número inteiro!")
-        return
-
-    # Adiciona o produto
-    produto = {"nome": nome, "quantidade": quantidade}
-    estoque.append(produto)
-
-    atualizar_tabela()
-    limpar_campos()
-    messagebox.showinfo("✅ Sucesso", f"Produto '{nome}' adicionado com sucesso!")
+estoque = []  # lista de produtos
 
 
-# ----------------------------------------------------
-# FUNÇÃO: Atualizar tabela
-# ----------------------------------------------------
-def atualizar_tabela():
+# ----------------------------------------------------------
+# FUNÇÃO: Atualizar tabela (usada em várias janelas)
+# ----------------------------------------------------------
+def atualizar_tabela(tabela):
     for item in tabela.get_children():
         tabela.delete(item)
 
-    for i, produto in enumerate(estoque):
-        tabela.insert("", "end", iid=i, values=(produto["nome"], produto["quantidade"]))
+    for produto in estoque:
+        tabela.insert("", "end", values=(produto["codigo"], produto["nome"], produto["quantidade"]))
 
 
-# ----------------------------------------------------
-# FUNÇÃO: Limpar campos
-# ----------------------------------------------------
-def limpar_campos():
-    entrada_nome.delete(0, tk.END)
-    entrada_quantidade.delete(0, tk.END)
+# ----------------------------------------------------------
+# JANELA: Cadastro de produtos
+# ----------------------------------------------------------
+def janela_cadastro():
+    cadastro = tk.Toplevel(root)
+    cadastro.title("📦 Cadastro de Produtos")
+    cadastro.geometry("500x400")
+    cadastro.configure(bg="#f4f7ff")
 
+    tk.Label(cadastro, text="CADASTRO DE PRODUTOS", font=("Arial", 15, "bold"), bg="#3F51B5", fg="white", pady=10).pack(fill="x")
 
-# ----------------------------------------------------
-# FUNÇÃO: Dar baixa no estoque
-# ----------------------------------------------------
-def dar_baixa():
-    try:
-        item_selecionado = tabela.selection()[0]
-        indice = int(item_selecionado)
-        produto = estoque[indice]
-    except IndexError:
-        messagebox.showwarning("Erro", "Selecione um produto para dar baixa!")
-        return
+    frame = tk.Frame(cadastro, bg="#f4f7ff")
+    frame.pack(pady=20)
 
-    # Janela de baixa
-    janela_baixa = tk.Toplevel(root)
-    janela_baixa.title("📦 Dar baixa no estoque")
-    janela_baixa.geometry("320x180")
-    janela_baixa.configure(bg="#f4f4f4")
+    tk.Label(frame, text="Código:", bg="#f4f7ff", font=("Arial", 11)).grid(row=0, column=0, padx=5, pady=5)
+    entrada_codigo = tk.Entry(frame, width=30)
+    entrada_codigo.grid(row=0, column=1, padx=5, pady=5)
 
-    tk.Label(janela_baixa, text=f"Produto: {produto['nome']}", font=("Arial", 11, "bold"), bg="#f4f4f4").pack(pady=10)
-    tk.Label(janela_baixa, text="Quantidade a dar baixa:", bg="#f4f4f4").pack()
-    entrada_baixa = tk.Entry(janela_baixa, justify="center", font=("Arial", 11))
-    entrada_baixa.pack(pady=5)
+    tk.Label(frame, text="Nome:", bg="#f4f7ff", font=("Arial", 11)).grid(row=1, column=0, padx=5, pady=5)
+    entrada_nome = tk.Entry(frame, width=30)
+    entrada_nome.grid(row=1, column=1, padx=5, pady=5)
 
-    def confirmar_baixa():
+    tk.Label(frame, text="Quantidade:", bg="#f4f7ff", font=("Arial", 11)).grid(row=2, column=0, padx=5, pady=5)
+    entrada_qtd = tk.Entry(frame, width=30)
+    entrada_qtd.grid(row=2, column=1, padx=5, pady=5)
+
+    def salvar_produto():
+        codigo = entrada_codigo.get().strip()
+        nome = entrada_nome.get().strip()
+        qtd = entrada_qtd.get().strip()
+
+        if codigo == "" or nome == "" or qtd == "":
+            messagebox.showwarning("⚠️ Atenção", "Preencha todos os campos!")
+            return
+
+        for p in estoque:
+            if p["codigo"] == codigo:
+                messagebox.showwarning("Erro", "Já existe um produto com esse código!")
+                return
+
         try:
-            qtd_baixa = int(entrada_baixa.get())
+            qtd = int(qtd)
         except ValueError:
-            messagebox.showwarning("Erro", "Digite um número válido!")
+            messagebox.showwarning("Erro", "Quantidade inválida!")
             return
 
-        if qtd_baixa <= 0:
-            messagebox.showwarning("Erro", "A quantidade deve ser maior que zero!")
-            return
+        estoque.append({"codigo": codigo, "nome": nome, "quantidade": qtd})
+        entrada_codigo.delete(0, tk.END)
+        entrada_nome.delete(0, tk.END)
+        entrada_qtd.delete(0, tk.END)
 
-        if qtd_baixa > produto["quantidade"]:
-            messagebox.showwarning("Erro", "Quantidade maior que o estoque disponível!")
-            return
+        messagebox.showinfo("✅ Sucesso", f"Produto '{nome}' cadastrado!")
 
-        produto["quantidade"] -= qtd_baixa
-        atualizar_tabela()
-        janela_baixa.destroy()
-        messagebox.showinfo("✅ Sucesso", f"Baixa de {qtd_baixa} unidade(s) do produto '{produto['nome']}' realizada!")
-
-    tk.Button(
-        janela_baixa, text="Confirmar Baixa", bg="#4CAF50", fg="white",
-        font=("Arial", 11, "bold"), relief="ridge", command=confirmar_baixa
-    ).pack(pady=10)
+    tk.Button(cadastro, text="Salvar Produto", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), width=18, command=salvar_produto).pack(pady=15)
+    tk.Button(cadastro, text="Fechar", bg="#9E9E9E", fg="white", width=18, command=cadastro.destroy).pack()
 
 
-# ----------------------------------------------------
-# INTERFACE PRINCIPAL
-# ----------------------------------------------------
+# ----------------------------------------------------------
+# JANELA: Consulta e Pesquisa
+# ----------------------------------------------------------
+def janela_consulta():
+    consulta = tk.Toplevel(root)
+    consulta.title("🔍 Consulta de Produtos")
+    consulta.geometry("600x400")
+    consulta.configure(bg="#f4f7ff")
+
+    tk.Label(consulta, text="CONSULTA DE PRODUTOS", font=("Arial", 15, "bold"), bg="#2196F3", fg="white", pady=10).pack(fill="x")
+
+    frame_busca = tk.Frame(consulta, bg="#f4f7ff")
+    frame_busca.pack(pady=10)
+
+    tk.Label(frame_busca, text="Pesquisar por nome ou código:", bg="#f4f7ff").grid(row=0, column=0, padx=5)
+    entrada_pesquisa = tk.Entry(frame_busca, width=30)
+    entrada_pesquisa.grid(row=0, column=1, padx=5)
+
+    colunas = ("Código", "Nome", "Quantidade")
+    tabela = ttk.Treeview(consulta, columns=colunas, show="headings")
+    tabela.heading("Código", text="Código")
+    tabela.heading("Nome", text="Nome")
+    tabela.heading("Quantidade", text="Quantidade")
+    tabela.pack(fill="both", expand=True, pady=10)
+
+    atualizar_tabela(tabela)
+
+    def pesquisar():
+        termo = entrada_pesquisa.get().strip().lower()
+        for item in tabela.get_children():
+            tabela.delete(item)
+
+        for p in estoque:
+            if termo in p["codigo"].lower() or termo in p["nome"].lower():
+                tabela.insert("", "end", values=(p["codigo"], p["nome"], p["quantidade"]))
+
+    tk.Button(frame_busca, text="Pesquisar", bg="#2196F3", fg="white", command=pesquisar).grid(row=0, column=2, padx=5)
+    tk.Button(consulta, text="Fechar", bg="#9E9E9E", fg="white", width=18, command=consulta.destroy).pack(pady=5)
+
+
+# ----------------------------------------------------------
+# JANELA: Relatório de Estoque Baixo
+# ----------------------------------------------------------
+def janela_estoque_baixo():
+    relatorio = tk.Toplevel(root)
+    relatorio.title("⚠️ Relatório de Estoque Baixo")
+    relatorio.geometry("550x350")
+    relatorio.configure(bg="#fff8f0")
+
+    tk.Label(relatorio, text="RELATÓRIO DE ESTOQUE BAIXO", font=("Arial", 15, "bold"), bg="#FF9800", fg="white", pady=10).pack(fill="x")
+
+    colunas = ("Código", "Nome", "Quantidade")
+    tabela = ttk.Treeview(relatorio, columns=colunas, show="headings")
+    tabela.heading("Código", text="Código")
+    tabela.heading("Nome", text="Produto")
+    tabela.heading("Quantidade", text="Qtd")
+    tabela.pack(fill="both", expand=True, pady=10)
+
+    for p in estoque:
+        if p["quantidade"] <= 5:  # define o limite do estoque baixo
+            tabela.insert("", "end", values=(p["codigo"], p["nome"], p["quantidade"]))
+
+    tk.Button(relatorio, text="Fechar", bg="#9E9E9E", fg="white", width=18, command=relatorio.destroy).pack(pady=10)
+
+
+# ----------------------------------------------------------
+# TELA PRINCIPAL
+# ----------------------------------------------------------
 root = tk.Tk()
-root.title("📦 Sistema de Controle de Estoque")
-root.geometry("600x500")
-root.configure(bg="#e8f0fe")  # fundo suave
+root.title("📊 Sistema de Controle de Estoque")
+root.geometry("450x400")
+root.configure(bg="#E3F2FD")
 
-# --- Título ---
-titulo = tk.Label(
-    root,
-    text="SISTEMA DE CONTROLE DE ESTOQUE",
-    font=("Arial", 16, "bold"),
-    bg="#1E88E5",
-    fg="white",
-    pady=10
-)
-titulo.pack(fill="x")
+tk.Label(root, text="SISTEMA DE ESTOQUE", font=("Arial", 16, "bold"), bg="#1976D2", fg="white", pady=12).pack(fill="x")
 
-# --- Frame dos campos ---
-frame_campos = tk.LabelFrame(root, text="Cadastro de Produto", bg="#e8f0fe", padx=10, pady=10)
-frame_campos.pack(pady=15, padx=20, fill="x")
+frame_botoes = tk.Frame(root, bg="#E3F2FD")
+frame_botoes.pack(expand=True)
 
-tk.Label(frame_campos, text="Nome do Produto:", bg="#e8f0fe", font=("Arial", 11)).grid(row=0, column=0, padx=5, pady=5)
-entrada_nome = tk.Entry(frame_campos, width=30, font=("Arial", 11))
-entrada_nome.grid(row=0, column=1, padx=5, pady=5)
+tk.Button(frame_botoes, text="📦 Cadastrar Produto", bg="#4CAF50", fg="white", font=("Arial", 12, "bold"), width=25, command=janela_cadastro).pack(pady=10)
+tk.Button(frame_botoes, text="🔍 Consultar / Pesquisar", bg="#2196F3", fg="white", font=("Arial", 12, "bold"), width=25, command=janela_consulta).pack(pady=10)
+tk.Button(frame_botoes, text="⚠️ Relatório de Estoque Baixo", bg="#FF9800", fg="white", font=("Arial", 12, "bold"), width=25, command=janela_estoque_baixo).pack(pady=10)
+tk.Button(frame_botoes, text="🚪 Sair do Sistema", bg="#E53935", fg="white", font=("Arial", 12, "bold"), width=25, command=root.destroy).pack(pady=10)
 
-tk.Label(frame_campos, text="Quantidade:", bg="#e8f0fe", font=("Arial", 11)).grid(row=1, column=0, padx=5, pady=5)
-entrada_quantidade = tk.Entry(frame_campos, width=30, font=("Arial", 11))
-entrada_quantidade.grid(row=1, column=1, padx=5, pady=5)
-
-# --- Botões ---
-frame_botoes = tk.Frame(root, bg="#e8f0fe")
-frame_botoes.pack(pady=10)
-
-btn_add = tk.Button(frame_botoes, text="➕ Adicionar Produto", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), width=20, relief="ridge", command=adicionar_produto)
-btn_add.grid(row=0, column=0, padx=10)
-
-btn_baixa = tk.Button(frame_botoes, text="⬇️ Dar Baixa no Estoque", bg="#FF9800", fg="white", font=("Arial", 11, "bold"), width=22, relief="ridge", command=dar_baixa)
-btn_baixa.grid(row=0, column=1, padx=10)
-
-# --- Tabela ---
-frame_tabela = tk.LabelFrame(root, text="Estoque Atual", bg="#e8f0fe")
-frame_tabela.pack(padx=20, pady=10, fill="both", expand=True)
-
-colunas = ("Produto", "Quantidade")
-tabela = ttk.Treeview(frame_tabela, columns=colunas, show="headings")
-tabela.heading("Produto", text="Produto")
-tabela.heading("Quantidade", text="Quantidade")
-tabela.column("Produto", width=300)
-tabela.column("Quantidade", width=100, anchor="center")
-tabela.pack(fill="both", expand=True, pady=5)
-
-# --- Barra de rolagem ---
-scrollbar = ttk.Scrollbar(frame_tabela, orient="vertical", command=tabela.yview)
-tabela.configure(yscroll=scrollbar.set)
-scrollbar.pack(side="right", fill="y")
-
-# --- Rodapé ---
-rodape = tk.Label(root, text="© 2025 - Sistema de Estoque | Feito em Python 🐍", bg="#1E88E5", fg="white", pady=8)
-rodape.pack(fill="x", side="bottom")
+tk.Label(root, text="© 2025 - Sistema de Estoque | Feito em Python 🐍", bg="#1976D2", fg="white", pady=6).pack(fill="x", side="bottom")
 
 root.mainloop()
