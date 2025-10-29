@@ -1,305 +1,167 @@
-"""
-estoque_interface_comentado.py
-Sistema de Controle de Estoque com interface Tkinter + JSON.
-Cada bloco e linha importante tem comentário explicando o que faz.
-Salve no mesmo diretório onde quiser que o arquivo estoque.json seja criado.
-"""
-
-# -----------------------
-# 1) IMPORTS (bibliotecas)
-# -----------------------
-# tkinter: cria a interface gráfica (janelas, botões, entradas)
-# messagebox: mostra caixas de diálogo (avisos, erros, info)
-# ttk: widgets "themed" (como Treeview para tabela)
-# json: salvar/ler os dados em formato JSON
-# os: verificar se o arquivo existe
 import tkinter as tk
-from tkinter import messagebox, ttk
-import json
-import os
+from tkinter import ttk, messagebox
 
-# -----------------------
-# 2) CONSTANTE DO ARQUIVO
-# -----------------------
-# Nome do arquivo onde os produtos serão salvos/recuperados.
-# Fica no mesmo diretório do script por padrão.
-ARQUIVO = "estoque.json"
+# ====================================================
+# SISTEMA DE CONTROLE DE ESTOQUE (VISUAL E COM BAIXA)
+# ====================================================
 
-# -----------------------------------
-# 3) FUNÇÕES DE ARMAZENAMENTO (I/O)
-# -----------------------------------
-def carregar_estoque():
-    """
-    Tenta abrir ARQUIVO e carregar a lista de produtos em JSON.
-    Se o arquivo não existir, retorna lista vazia.
-    """
-    if os.path.exists(ARQUIVO):
-        with open(ARQUIVO, "r", encoding="utf-8") as f:
-            # json.load converte o texto JSON em objeto Python (lista/dicionários)
-            return json.load(f)
-    else:
-        # Arquivo não existe -> começa com estoque vazio
-        return []
+estoque = []  # Lista de produtos armazenados
 
-def salvar_estoque(estoque):
-    """
-    Recebe a lista 'estoque' e grava no ARQUIVO em formato JSON.
-    indent=4 organiza a saída para leitura humana.
-    ensure_ascii=False preserva caracteres acentuados.
-    """
-    with open(ARQUIVO, "w", encoding="utf-8") as f:
-        json.dump(estoque, f, indent=4, ensure_ascii=False)
 
-# -----------------------------------
-# 4) FUNÇÕES PRINCIPAIS DO SISTEMA
-# -----------------------------------
-def atualizar_tabela(filtro=""):
-    """
-    Limpa a tabela e insere os itens do estoque que batem com o filtro.
-    O filtro é comparado com nome e código (case-insensitive).
-    """
-    # Remove todas as linhas da tabela antes de re-popular
+# ----------------------------------------------------
+# FUNÇÃO: Adicionar produto
+# ----------------------------------------------------
+def adicionar_produto():
+    nome = entrada_nome.get().strip()
+    quantidade = entrada_quantidade.get().strip()
+
+    if nome == "" or quantidade == "":
+        messagebox.showwarning("⚠️ Atenção", "Preencha todos os campos!")
+        return
+
+    try:
+        quantidade = int(quantidade)
+    except ValueError:
+        messagebox.showwarning("Erro", "A quantidade deve ser um número inteiro!")
+        return
+
+    # Adiciona o produto
+    produto = {"nome": nome, "quantidade": quantidade}
+    estoque.append(produto)
+
+    atualizar_tabela()
+    limpar_campos()
+    messagebox.showinfo("✅ Sucesso", f"Produto '{nome}' adicionado com sucesso!")
+
+
+# ----------------------------------------------------
+# FUNÇÃO: Atualizar tabela
+# ----------------------------------------------------
+def atualizar_tabela():
     for item in tabela.get_children():
         tabela.delete(item)
 
-    termo = filtro.lower().strip()  # torna busca insensível a maiúsculas/minúsculas
-    for p in estoque:
-        # Se o filtro estiver vazio ou corresponder ao nome/código, insere na tabela
-        if termo == "" or termo in p["nome"].lower() or termo in p["codigo"].lower():
-            # valores exibidos: código, nome, quantidade, preço formatado
-            tabela.insert("", tk.END, values=(p["codigo"], p["nome"], p["quantidade"], f"R$ {p['preco']:.2f}"))
+    for i, produto in enumerate(estoque):
+        tabela.insert("", "end", iid=i, values=(produto["nome"], produto["quantidade"]))
 
-def cadastrar_produto():
-    """
-    Lê valores dos campos, valida, cria dicionário do produto e salva no estoque.
-    Também atualiza a tabela e limpa os campos de input.
-    """
-    codigo = entrada_codigo.get().strip()
-    nome = entrada_nome.get().strip()
-    quantidade_texto = entrada_quantidade.get().strip()
-    preco_texto = entrada_preco.get().strip()
 
-    # Verifica se todos os campos foram preenchidos
-    if not codigo or not nome or not quantidade_texto or not preco_texto:
-        messagebox.showwarning("Aviso", "Preencha todos os campos!")
-        return
-
-    # Verifica se o código já existe para evitar duplicação
-    for p in estoque:
-        if p["codigo"] == codigo:
-            messagebox.showerror("Erro", "Código já cadastrado!")
-            return
-
-    # Tenta converter quantidade e preço para os tipos corretos
-    try:
-        quantidade = int(quantidade_texto)
-        preco = float(preco_texto)
-    except ValueError:
-        messagebox.showerror("Erro", "Quantidade deve ser inteiro e preço deve ser número (ex: 12.50)!")
-        return
-
-    # Cria o dicionário do produto e adiciona à lista estoque
-    produto = {"codigo": codigo, "nome": nome, "quantidade": quantidade, "preco": preco}
-    estoque.append(produto)
-
-    # Salva no arquivo e atualiza a tabela visual
-    salvar_estoque(estoque)
-    atualizar_tabela()
-    limpar_campos()
-    messagebox.showinfo("Sucesso", "Produto cadastrado com sucesso!")
-
-def entrada_produto():
-    """
-    Aumenta a quantidade de um produto já cadastrado.
-    O usuário informa código e quantidade.
-    """
-    codigo = entrada_codigo.get().strip()
-    qtd_texto = entrada_quantidade.get().strip()
-
-    if not codigo or not qtd_texto:
-        messagebox.showwarning("Aviso", "Informe o código e a quantidade!")
-        return
-
-    try:
-        qtd = int(qtd_texto)
-    except ValueError:
-        messagebox.showerror("Erro", "Quantidade inválida! Use número inteiro.")
-        return
-
-    # Procura o produto pelo código
-    for p in estoque:
-        if p["codigo"] == codigo:
-            p["quantidade"] += qtd  # adiciona à quantidade existente
-            salvar_estoque(estoque)
-            atualizar_tabela()
-            messagebox.showinfo("Sucesso", "Entrada registrada!")
-            return
-
-    messagebox.showerror("Erro", "Produto não encontrado!")
-
-def saida_produto():
-    """
-    Diminui a quantidade de um produto já cadastrado.
-    Verifica se há quantidade suficiente antes de subtrair.
-    """
-    codigo = entrada_codigo.get().strip()
-    qtd_texto = entrada_quantidade.get().strip()
-
-    if not codigo or not qtd_texto:
-        messagebox.showwarning("Aviso", "Informe o código e a quantidade!")
-        return
-
-    try:
-        qtd = int(qtd_texto)
-    except ValueError:
-        messagebox.showerror("Erro", "Quantidade inválida! Use número inteiro.")
-        return
-
-    for p in estoque:
-        if p["codigo"] == codigo:
-            if p["quantidade"] >= qtd:
-                p["quantidade"] -= qtd
-                salvar_estoque(estoque)
-                atualizar_tabela()
-                messagebox.showinfo("Sucesso", "Saída registrada!")
-            else:
-                messagebox.showwarning("Aviso", "Quantidade insuficiente no estoque!")
-            return
-
-    messagebox.showerror("Erro", "Produto não encontrado!")
-
-def relatorio_baixo_estoque():
-    """
-    Gera uma lista dos produtos com quantidade abaixo de um limite (aqui padrão 5).
-    Mostra uma messagebox com os nomes e quantidades.
-    """
-    limite = 5  # você pode alterar ou pedir ao usuário antes
-    baixo = [p for p in estoque if p["quantidade"] < limite]
-    if not baixo:
-        messagebox.showinfo("Estoque OK", "Nenhum produto com baixo estoque!")
-    else:
-        msg = "\n".join([f"{p['nome']} — {p['quantidade']} unidades" for p in baixo])
-        messagebox.showwarning("Baixo Estoque", msg)
-
+# ----------------------------------------------------
+# FUNÇÃO: Limpar campos
+# ----------------------------------------------------
 def limpar_campos():
-    """
-    Limpa os Entry widgets para facilitar novo cadastro/entrada/saída.
-    """
-    entrada_codigo.delete(0, tk.END)
     entrada_nome.delete(0, tk.END)
     entrada_quantidade.delete(0, tk.END)
-    entrada_preco.delete(0, tk.END)
-    # opcional: reposicionar foco no campo código
-    entrada_codigo.focus()
 
-def buscar_produto(event=None):
-    """
-    Lido quando o usuário digita no campo de busca.
-    Obtém o termo e chama atualizar_tabela para filtrar visualmente.
-    """
-    termo = entrada_busca.get().strip()
-    atualizar_tabela(termo)
 
-# -----------------------
-# 5) INTERFACE GRÁFICA (janela, widgets)
-# -----------------------
-# Carrega os dados armazenados (se houver) antes de criar a interface
-estoque = carregar_estoque()
+# ----------------------------------------------------
+# FUNÇÃO: Dar baixa no estoque
+# ----------------------------------------------------
+def dar_baixa():
+    try:
+        item_selecionado = tabela.selection()[0]
+        indice = int(item_selecionado)
+        produto = estoque[indice]
+    except IndexError:
+        messagebox.showwarning("Erro", "Selecione um produto para dar baixa!")
+        return
 
-# Cria a janela principal do Tkinter
-janela = tk.Tk()
-janela.title("📦 Sistema de Controle de Estoque (Comentado)")
-# Define tamanho da janela (largura x altura). Ajuste se quiser.
-janela.geometry("760x560")
-janela.resizable(False, False)  # evita redimensionamento (facilita layout fixo)
+    # Janela de baixa
+    janela_baixa = tk.Toplevel(root)
+    janela_baixa.title("📦 Dar baixa no estoque")
+    janela_baixa.geometry("320x180")
+    janela_baixa.configure(bg="#f4f4f4")
 
-# ----- FRAME: busca -----
-# Agrupar widgets facilita posicionamento; aqui criamos um frame para a busca
-frame_busca = tk.Frame(janela)
-frame_busca.pack(pady=8)  # espaçamento vertical
+    tk.Label(janela_baixa, text=f"Produto: {produto['nome']}", font=("Arial", 11, "bold"), bg="#f4f4f4").pack(pady=10)
+    tk.Label(janela_baixa, text="Quantidade a dar baixa:", bg="#f4f4f4").pack()
+    entrada_baixa = tk.Entry(janela_baixa, justify="center", font=("Arial", 11))
+    entrada_baixa.pack(pady=5)
 
-# Label explicativo da busca
-tk.Label(frame_busca, text="🔎 Buscar produto (código ou nome):").pack(side=tk.LEFT, padx=5)
+    def confirmar_baixa():
+        try:
+            qtd_baixa = int(entrada_baixa.get())
+        except ValueError:
+            messagebox.showwarning("Erro", "Digite um número válido!")
+            return
 
-# Entrada de texto para busca
-entrada_busca = tk.Entry(frame_busca, width=40)
-entrada_busca.pack(side=tk.LEFT)
-# Bind: toda vez que uma tecla for solta dentro da entrada, chamar buscar_produto
-entrada_busca.bind("<KeyRelease>", buscar_produto)
+        if qtd_baixa <= 0:
+            messagebox.showwarning("Erro", "A quantidade deve ser maior que zero!")
+            return
 
-# ----- FRAME: inputs (código, nome, qtd, preco) -----
-frame_inputs = tk.Frame(janela)
-frame_inputs.pack(pady=10)
+        if qtd_baixa > produto["quantidade"]:
+            messagebox.showwarning("Erro", "Quantidade maior que o estoque disponível!")
+            return
 
-# Label e Entry para Código
-tk.Label(frame_inputs, text="Código:").grid(row=0, column=0, padx=5, pady=3, sticky="w")
-entrada_codigo = tk.Entry(frame_inputs, width=12)
-entrada_codigo.grid(row=0, column=1, pady=3)
+        produto["quantidade"] -= qtd_baixa
+        atualizar_tabela()
+        janela_baixa.destroy()
+        messagebox.showinfo("✅ Sucesso", f"Baixa de {qtd_baixa} unidade(s) do produto '{produto['nome']}' realizada!")
 
-# Label e Entry para Nome
-tk.Label(frame_inputs, text="Nome:").grid(row=0, column=2, padx=5, pady=3, sticky="w")
-entrada_nome = tk.Entry(frame_inputs, width=30)
-entrada_nome.grid(row=0, column=3, pady=3)
+    tk.Button(
+        janela_baixa, text="Confirmar Baixa", bg="#4CAF50", fg="white",
+        font=("Arial", 11, "bold"), relief="ridge", command=confirmar_baixa
+    ).pack(pady=10)
 
-# Label e Entry para Quantidade
-tk.Label(frame_inputs, text="Qtd:").grid(row=1, column=0, padx=5, pady=3, sticky="w")
-entrada_quantidade = tk.Entry(frame_inputs, width=12)
-entrada_quantidade.grid(row=1, column=1, pady=3)
 
-# Label e Entry para Preço
-tk.Label(frame_inputs, text="Preço (ex: 12.50):").grid(row=1, column=2, padx=5, pady=3, sticky="w")
-entrada_preco = tk.Entry(frame_inputs, width=12)
-entrada_preco.grid(row=1, column=3, pady=3)
+# ----------------------------------------------------
+# INTERFACE PRINCIPAL
+# ----------------------------------------------------
+root = tk.Tk()
+root.title("📦 Sistema de Controle de Estoque")
+root.geometry("600x500")
+root.configure(bg="#e8f0fe")  # fundo suave
 
-# ----- FRAME: botões principais -----
-frame_botoes = tk.Frame(janela)
+# --- Título ---
+titulo = tk.Label(
+    root,
+    text="SISTEMA DE CONTROLE DE ESTOQUE",
+    font=("Arial", 16, "bold"),
+    bg="#1E88E5",
+    fg="white",
+    pady=10
+)
+titulo.pack(fill="x")
+
+# --- Frame dos campos ---
+frame_campos = tk.LabelFrame(root, text="Cadastro de Produto", bg="#e8f0fe", padx=10, pady=10)
+frame_campos.pack(pady=15, padx=20, fill="x")
+
+tk.Label(frame_campos, text="Nome do Produto:", bg="#e8f0fe", font=("Arial", 11)).grid(row=0, column=0, padx=5, pady=5)
+entrada_nome = tk.Entry(frame_campos, width=30, font=("Arial", 11))
+entrada_nome.grid(row=0, column=1, padx=5, pady=5)
+
+tk.Label(frame_campos, text="Quantidade:", bg="#e8f0fe", font=("Arial", 11)).grid(row=1, column=0, padx=5, pady=5)
+entrada_quantidade = tk.Entry(frame_campos, width=30, font=("Arial", 11))
+entrada_quantidade.grid(row=1, column=1, padx=5, pady=5)
+
+# --- Botões ---
+frame_botoes = tk.Frame(root, bg="#e8f0fe")
 frame_botoes.pack(pady=10)
 
-# Botão: Cadastrar produto (chama cadastrar_produto)
-btn_cadastrar = tk.Button(frame_botoes, text="Cadastrar Produto", command=cadastrar_produto, width=18)
-btn_cadastrar.grid(row=0, column=0, padx=6, pady=3)
+btn_add = tk.Button(frame_botoes, text="➕ Adicionar Produto", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), width=20, relief="ridge", command=adicionar_produto)
+btn_add.grid(row=0, column=0, padx=10)
 
-# Botão: Entrada de produto (aumenta a quantidade)
-btn_entrada = tk.Button(frame_botoes, text="Entrada de Produto", command=entrada_produto, width=18)
-btn_entrada.grid(row=0, column=1, padx=6, pady=3)
+btn_baixa = tk.Button(frame_botoes, text="⬇️ Dar Baixa no Estoque", bg="#FF9800", fg="white", font=("Arial", 11, "bold"), width=22, relief="ridge", command=dar_baixa)
+btn_baixa.grid(row=0, column=1, padx=10)
 
-# Botão: Saída de produto (diminui a quantidade)
-btn_saida = tk.Button(frame_botoes, text="Saída de Produto", command=saida_produto, width=18)
-btn_saida.grid(row=0, column=2, padx=6, pady=3)
+# --- Tabela ---
+frame_tabela = tk.LabelFrame(root, text="Estoque Atual", bg="#e8f0fe")
+frame_tabela.pack(padx=20, pady=10, fill="both", expand=True)
 
-# Botão: Relatório de baixo estoque
-btn_relatorio = tk.Button(frame_botoes, text="Relatório Baixo Estoque", command=relatorio_baixo_estoque, width=18)
-btn_relatorio.grid(row=0, column=3, padx=6, pady=3)
+colunas = ("Produto", "Quantidade")
+tabela = ttk.Treeview(frame_tabela, columns=colunas, show="headings")
+tabela.heading("Produto", text="Produto")
+tabela.heading("Quantidade", text="Quantidade")
+tabela.column("Produto", width=300)
+tabela.column("Quantidade", width=100, anchor="center")
+tabela.pack(fill="both", expand=True, pady=5)
 
-# Botão: Limpar campos
-btn_limpar = tk.Button(frame_botoes, text="Limpar Campos", command=limpar_campos, width=18)
-btn_limpar.grid(row=1, column=1, padx=6, pady=6)
+# --- Barra de rolagem ---
+scrollbar = ttk.Scrollbar(frame_tabela, orient="vertical", command=tabela.yview)
+tabela.configure(yscroll=scrollbar.set)
+scrollbar.pack(side="right", fill="y")
 
-# ----- TABELA (Treeview) para mostrar o estoque -----
-# Definimos as colunas: código, nome, quantidade e preço
-colunas = ("codigo", "nome", "quantidade", "preco")
-tabela = ttk.Treeview(janela, columns=colunas, show="headings", height=15)
+# --- Rodapé ---
+rodape = tk.Label(root, text="© 2025 - Sistema de Estoque | Feito em Python 🐍", bg="#1E88E5", fg="white", pady=8)
+rodape.pack(fill="x", side="bottom")
 
-# Cabeçalhos (texto que aparece na tabela)
-tabela.heading("codigo", text="Código")
-tabela.heading("nome", text="Nome")
-tabela.heading("quantidade", text="Qtd")
-tabela.heading("preco", text="Preço")
-
-# Largura de colunas e alinhamento
-tabela.column("codigo", width=100, anchor="center")
-tabela.column("nome", width=340, anchor="w")
-tabela.column("quantidade", width=80, anchor="center")
-tabela.column("preco", width=100, anchor="center")
-
-# Posiciona a tabela na janela com um padding (espaçamento) ao redor
-tabela.pack(padx=10, pady=10)
-
-# Atualiza a tabela com os dados carregados do arquivo
-atualizar_tabela()
-
-# --------------------------------
-# 6) LOOP PRINCIPAL DO TKINTER
-# --------------------------------
-# Esta linha mantém a janela aberta e responde a eventos (cliques, digitação, etc.)
-janela.mainloop()
+root.mainloop()
