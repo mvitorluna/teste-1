@@ -1,18 +1,42 @@
 import tkinter as tk
 from tkinter import ttk, messagebox
+import json
+import os
 
 # ==========================================================
-# SISTEMA DE CONTROLE DE ESTOQUE COMPLETO
-# - Cadastro de produtos
-# - Consulta e pesquisa
-# - Relatório de estoque baixo
+# SISTEMA DE CONTROLE DE ESTOQUE COMPLETO (v2)
+# Agora com armazenamento automático em arquivo JSON!
 # ==========================================================
 
-estoque = []  # lista de produtos
+ARQUIVO_ESTOQUE = "estoque.json"
+
+# ----------------------------------------------------------
+# Funções de salvar e carregar dados
+# ----------------------------------------------------------
+def carregar_estoque():
+    if os.path.exists(ARQUIVO_ESTOQUE):
+        try:
+            with open(ARQUIVO_ESTOQUE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            messagebox.showwarning("Erro", "Arquivo de dados corrompido. Criando novo estoque...")
+            return []
+    return []
+
+
+def salvar_estoque():
+    with open(ARQUIVO_ESTOQUE, "w", encoding="utf-8") as f:
+        json.dump(estoque, f, indent=4, ensure_ascii=False)
 
 
 # ----------------------------------------------------------
-# FUNÇÃO: Atualizar tabela (usada em várias janelas)
+# Carrega os produtos ao iniciar o sistema
+# ----------------------------------------------------------
+estoque = carregar_estoque()
+
+
+# ----------------------------------------------------------
+# Atualiza uma tabela específica
 # ----------------------------------------------------------
 def atualizar_tabela(tabela):
     for item in tabela.get_children():
@@ -69,6 +93,8 @@ def janela_cadastro():
             return
 
         estoque.append({"codigo": codigo, "nome": nome, "quantidade": qtd})
+        salvar_estoque()  # 🔥 salva imediatamente após o cadastro
+
         entrada_codigo.delete(0, tk.END)
         entrada_nome.delete(0, tk.END)
         entrada_qtd.delete(0, tk.END)
@@ -138,7 +164,7 @@ def janela_estoque_baixo():
     tabela.pack(fill="both", expand=True, pady=10)
 
     for p in estoque:
-        if p["quantidade"] <= 5:  # define o limite do estoque baixo
+        if p["quantidade"] <= 5:
             tabela.insert("", "end", values=(p["codigo"], p["nome"], p["quantidade"]))
 
     tk.Button(relatorio, text="Fechar", bg="#9E9E9E", fg="white", width=18, command=relatorio.destroy).pack(pady=10)
