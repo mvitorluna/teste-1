@@ -1,0 +1,479 @@
+"""
+sistema_estoque_abas_brbrasil.py
+Painel com abas (Tkinter + ttk.Notebook), visual BR Brasil (azul escuro / amarelo),
+persistência com SQLite (estoque.db). Tenta carregar 'logo.png' na mesma pasta.
+"""
+
+import os
+import sqlite3
+import csv
+import tkinter as tk
+from tkinter import ttk, messagebox, filedialog
+
+DB_FILE = "estoque.db"
+LOW_STOCK_LIMIT = 5  # limite usado no relatório de estoque baixo
+
+# ---------------------------
+# Banco de dados (SQLite)
+# ---------------------------
+def conectar_banco(path=DB_FILE):
+    conn = sqlite3.connect(path)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS produtos (
+            codigo TEXT PRIMARY KEY,
+            nome TEXT NOT NULL,
+            quantidade INTEGER NOT NULL
+        )
+    """)
+    conn.commit()
+    return conn
+
+# CRUD básico
+def inserir_produto(conn, codigo, nome, quantidade):
+    try:
+        with conn:
+            conn.execute("INSERT INTO produtos (codigo, nome, quantidade) VALUES (?, ?, ?)",
+                         (codigo, nome, quantidade))
+        return True
+    except sqlite3.IntegrityError:
+        return False
+
+def atualizar_produto(conn, codigo, nome=None, quantidade=None):
+    with conn:
+        if nome is not None and quantidade is not None:
+            conn.execute("UPDATE produtos SET nome = ?, quantidade = ? WHERE codigo = ?",
+                         (nome, quantidade, codigo))
+        elif nome is not None:
+            conn.execute("UPDATE produtos SET nome = ? WHERE codigo = ?", (nome, codigo))
+        elif quantidade is not None:
+            conn.execute("UPDATE produtos SET quantidade = ? WHERE codigo = ?", (quantidade, codigo))
+
+def remover_produto(conn, codigo):
+    with conn:
+        conn.execute("DELETE FROM produtos WHERE codigo = ?", (codigo,))
+
+def listar_produtos(conn, filtro=None):
+    cur = conn.cursor()
+    if filtro:
+        chave = f"%{filtro}%"
+        cur.execute("SELECT codigo, nome, quantidade FROM produtos WHERE codigo LIKE ? OR nome LIKE ? ORDER BY nome",
+                    (chave, chave))
+    else:
+        cur.execute("SELECT codigo, nome, quantidade FROM produtos ORDER BY nome")
+    return cur.fetchall()
+
+def buscar_produto(conn, codigo):
+    cur = conn.cursor()
+    cur.execute("SELECT codigo, nome, quantidade FROM produtos WHERE codigo = ?", (codigo,))
+    return cur.fetchone()
+
+def listar_estoque_baixo(conn, limite=LOW_STOCK_LIMIT):
+    cur = conn.cursor()
+    cur.execute("SELECT codigo, nome, quantidade FROM produtos WHERE quantidade <= ? ORDER BY quantidade", (limite,))
+    return cur.fetchall()
+
+# ---------------------------
+# UI + Lógica da aplicação
+# ---------------------------
+class SistemaEstoque:
+    def __init__(self, root, conexao):
+        self.root = root
+        self.conn = conexao
+
+        # Paleta de cores inspirada na marca
+        self.COR_BG = "#07153a"        # azul bem escuro de fundo
+        self.COR_CARD = "#0f2b5f"      # azul card
+        self.COR_PRIMARY = "#132b63"   # azul principal
+        self.COR_ACCENT = "#ffd200"    # amarelo/dourado (detalhes)
+        self.COR_TEXT = "#ffffff"
+
+        self.root.title("BR Brasil — Sistema de Estoque (Painel)")
+        self.root.geometry("980x620")
+        self.root.configure(bg=self.COR_BG)
+
+        self._style = ttk.Style()
+        # Use tema nativo e ajuste cores onde possível
+        self._style.theme_use('default')
+
+        self._criar_header()
+        self._criar_notebook()
+        self._criar_abas()
+        self._criar_footer()
+
+    # Header com logo (tenta carregar logo.png)
+    def _criar_header(self):
+        header = tk.Frame(self.root, bg=self.COR_PRIMARY, height=80)
+        header.pack(fill="x", side="top")
+
+        logo_file = "logo.png"
+        if os.path.exists(logo_file):
+            try:
+                self.logo_img = tk.PhotoImage(file=logo_file)
+                w = self.logo_img.width()
+                if w > 220:
+                    factor = int(w / 200) + 1
+                    self.logo_img = self.logo_img.subsample(factor, factor)
+                lbl_logo = tk.Label(header, image=self.logo_img, bg=self.COR_PRIMARY)
+                lbl_logo.pack(side="left", padx=12, pady=8)
+            except Exception:
+                tk.Label(header, text="BR BRASIL", bg=self.COR_PRIMARY, fg=self.COR_TEXT,
+                         font=("Helvetica", 16, "bold")).pack(side="left", padx=12, pady=8)
+        else:
+            tk.Label(header, text="BR BRASIL — INDÚSTRIA QUÍMICA", bg=self.COR_PRIMARY, fg=self.COR_TEXT,
+                     font=("Helvetica", 16, "bold")).pack(side="left", padx=12, pady=8)
+
+        tk.Label(header, text="Painel de Controle de Estoque", bg=self.COR_PRIMARY,
+                 fg=self.COR_ACCENT, font=("Helvetica", 14, "bold")).pack(side="left", padx=10)
+
+    # Notebook (abas)
+    def _criar_notebook(self):
+        style = self._style
+        # notebook colors: tab background not fully themeable on all platforms; we'll customize frames colors
+        style.configure('TNotebook', background=self.COR_BG)
+        style.configure('TNotebook.Tab', background=self.COR_CARD, foreground=self.COR_TEXT, padding=[12, 8])
+        style.map('TNotebook.Tab', background=[('selected', self.COR_PRIMARY)])
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill='both', expand=True, padx=12, pady=(12, 6))
+
+    # criar abas: Cadastro, Estoque, Relatórios
+    def _criar_abas(self):
+        self.aba_cadastro = tk.Frame(self.notebook, bg=self.COR_BG)
+        self.aba_estoque = tk.Frame(self.notebook, bg=self.COR_BG)
+        self.aba_relatorios = tk.Frame(self.notebook, bg=self.COR_BG)
+
+        self.notebook.add(self.aba_cadastro, text="Cadastro")
+        self.notebook.add(self.aba_estoque, text="Estoque")
+        self.notebook.add(self.aba_relatorios, text="Relatórios")
+
+        self._montar_aba_cadastro()
+        self._montar_aba_estoque()
+        self._montar_aba_relatorios()
+
+    # Aba Cadastro
+    def _montar_aba_cadastro(self):
+        frm = self.aba_cadastro
+        card = tk.LabelFrame(frm, text="Cadastrar novo produto", bg=self.COR_BG, fg=self.COR_ACCENT, padx=12, pady=12)
+        card.pack(fill="x", padx=14, pady=12)
+
+        # Labels e entries
+        tk.Label(card, text="Código:", bg=self.COR_BG, fg=self.COR_TEXT).grid(row=0, column=0, sticky="w", padx=6, pady=6)
+        self.entry_cod = tk.Entry(card, width=24, font=("Arial", 11))
+        self.entry_cod.grid(row=0, column=1, padx=6, pady=6)
+
+        tk.Label(card, text="Nome:", bg=self.COR_BG, fg=self.COR_TEXT).grid(row=1, column=0, sticky="w", padx=6, pady=6)
+        self.entry_nome = tk.Entry(card, width=48, font=("Arial", 11))
+        self.entry_nome.grid(row=1, column=1, columnspan=2, padx=6, pady=6)
+
+        tk.Label(card, text="Quantidade:", bg=self.COR_BG, fg=self.COR_TEXT).grid(row=2, column=0, sticky="w", padx=6, pady=6)
+        self.entry_qtd = tk.Entry(card, width=12, font=("Arial", 11))
+        self.entry_qtd.grid(row=2, column=1, padx=6, pady=6, sticky="w")
+
+        btn_salvar = tk.Button(card, text="Salvar Produto", bg=self.COR_ACCENT, fg="black", width=20, command=self.ui_salvar_produto)
+        btn_salvar.grid(row=3, column=0, columnspan=1, padx=6, pady=10)
+        btn_limpar = tk.Button(card, text="Limpar Campos", bg="#555", fg="white", width=16, command=self._limpar_campos_cadastro)
+        btn_limpar.grid(row=3, column=1, padx=6, pady=10, sticky="w")
+
+    # Aba Estoque (lista, busca, baixa rápida)
+    def _montar_aba_estoque(self):
+        frm = self.aba_estoque
+        topbar = tk.Frame(frm, bg=self.COR_BG)
+        topbar.pack(fill="x", padx=12, pady=8)
+
+        tk.Label(topbar, text="Buscar:", bg=self.COR_BG, fg=self.COR_TEXT).pack(side="left", padx=(6, 8))
+        self.entry_busca = tk.Entry(topbar, width=34)
+        self.entry_busca.pack(side="left", padx=4)
+        tk.Button(topbar, text="Pesquisar", bg=self.COR_PRIMARY, fg="white", command=self.ui_pesquisar).pack(side="left", padx=6)
+        tk.Button(topbar, text="Atualizar", bg="#666", fg="white", command=self.atualizar_tabela).pack(side="left", padx=6)
+
+        # Treeview principal
+        cols = ("codigo", "nome", "quantidade")
+        self.tree_main = ttk.Treeview(frm, columns=cols, show="headings", height=18)
+        self.tree_main.heading("codigo", text="Código")
+        self.tree_main.heading("nome", text="Nome")
+        self.tree_main.heading("quantidade", text="Quantidade")
+        self.tree_main.column("codigo", width=140, anchor="center")
+        self.tree_main.column("nome", width=520)
+        self.tree_main.column("quantidade", width=120, anchor="center")
+        self.tree_main.pack(fill="both", expand=True, padx=12, pady=(4,10))
+
+        # Scroll
+        vsb = ttk.Scrollbar(frm, orient="vertical", command=self.tree_main.yview)
+        self.tree_main.configure(yscroll=vsb.set)
+        vsb.place(in_=self.tree_main, relx=1.0, rely=0, relheight=1.0, bordermode="outside")
+
+        # Bind: duplo clique abre diálogo de edição/baixa
+        self.tree_main.bind("<Double-1>", self._on_double_click_row)
+
+        # Bottom quick actions
+        bottom = tk.Frame(frm, bg=self.COR_BG)
+        bottom.pack(fill="x", padx=12, pady=8)
+        tk.Button(bottom, text="Dar Baixa (Selecionado)", bg=self.COR_ACCENT, fg="black", command=self.ui_dar_baixa_selecionado).pack(side="left", padx=6)
+        tk.Button(bottom, text="Editar (Selecionado)", bg="#4CAF50", fg="white", command=self.ui_editar_selecionado).pack(side="left", padx=6)
+        tk.Button(bottom, text="Remover (Selecionado)", bg="#D32F2F", fg="white", command=self.ui_remover_selecionado).pack(side="left", padx=6)
+
+        self.atualizar_tabela()
+
+    # Aba Relatórios
+    def _montar_aba_relatorios(self):
+        frm = self.aba_relatorios
+
+        tk.Label(frm, text="Relatórios", bg=self.COR_BG, fg=self.COR_ACCENT, font=("Arial", 12, "bold")).pack(anchor="w", padx=12, pady=(12,6))
+
+        # Relatório completo + export CSV
+        frame_all = tk.LabelFrame(frm, text="Relatório Completo", bg=self.COR_BG, fg=self.COR_TEXT, padx=8, pady=8)
+        frame_all.pack(fill="both", expand=False, padx=12, pady=8)
+
+        tk.Button(frame_all, text="Visualizar Relatório Completo", bg="#607D8B", fg="white", command=self.ui_relatorio_completo).pack(side="left", padx=6, pady=4)
+        tk.Button(frame_all, text="Exportar CSV (Completo)", bg=self.COR_ACCENT, fg="black", command=lambda: self._exportar_csv(tipo="completo")).pack(side="left", padx=6, pady=4)
+
+        # Relatório estoque baixo
+        frame_low = tk.LabelFrame(frm, text=f"Estoque Baixo (<= {LOW_STOCK_LIMIT})", bg=self.COR_BG, fg=self.COR_TEXT, padx=8, pady=8)
+        frame_low.pack(fill="both", expand=False, padx=12, pady=8)
+
+        tk.Button(frame_low, text="Visualizar Estoque Baixo", bg=self.COR_ACCENT, fg="black", command=self.ui_relatorio_baixo).pack(side="left", padx=6, pady=4)
+        tk.Button(frame_low, text="Exportar CSV (Baixo)", bg="#FF8A65", fg="black", command=lambda: self._exportar_csv(tipo="baixo")).pack(side="left", padx=6, pady=4)
+
+    def _criar_footer(self):
+        footer = tk.Frame(self.root, bg=self.COR_PRIMARY)
+        footer.pack(fill="x", side="bottom")
+        tk.Label(footer, text="© 2025 BR Brasil — Sistema de Estoque", bg=self.COR_PRIMARY, fg="white").pack(pady=6)
+
+    # ------------------ ações UI ------------------
+    def ui_salvar_produto(self):
+        codigo = self.entry_cod.get().strip()
+        nome = self.entry_nome.get().strip()
+        qtd = self.entry_qtd.get().strip()
+        if not codigo or not nome or not qtd:
+            messagebox.showwarning("Atenção", "Preencha todos os campos.")
+            return
+        try:
+            qtd_i = int(qtd)
+            if qtd_i < 0:
+                raise ValueError
+        except ValueError:
+            messagebox.showerror("Erro", "Quantidade inválida.")
+            return
+        ok = inserir_produto(self.conn, codigo, nome, qtd_i)
+        if not ok:
+            messagebox.showerror("Erro", "Código já cadastrado.")
+            return
+        messagebox.showinfo("Sucesso", f"Produto '{nome}' salvo.")
+        self._limpar_campos_cadastro()
+        self.atualizar_tabela_principal()
+
+    def ui_pesquisar(self):
+        termo = self.entry_busca.get().strip()
+        dados = listar_produtos(self.conn, termo)
+        # preencher tree_main
+        for it in self.tree_main.get_children():
+            self.tree_main.delete(it)
+        for cod, nome, qtd in dados:
+            self.tree_main.insert("", "end", values=(cod, nome, qtd))
+
+    def atualizar_tabela(self):
+        # alias para atualizar tabela principal (sem filtro)
+        self.atualizar_tabela_principal()
+
+    def atualizar_tabela_principal(self):
+        dados = listar_produtos(self.conn)
+        for it in self.tree_main.get_children():
+            self.tree_main.delete(it)
+        for cod, nome, qtd in dados:
+            self.tree_main.insert("", "end", values=(cod, nome, qtd))
+
+    def ui_dar_baixa_selecionado(self):
+        sel = self.tree_main.selection()
+        if not sel:
+            messagebox.showwarning("Atenção", "Selecione um produto na lista.")
+            return
+        vals = self.tree_main.item(sel[0], "values")
+        codigo = vals[0]
+        self._abrir_janela_baixa(codigo)
+
+    def ui_editar_selecionado(self):
+        sel = self.tree_main.selection()
+        if not sel:
+            messagebox.showwarning("Atenção", "Selecione um produto na lista.")
+            return
+        vals = self.tree_main.item(sel[0], "values")
+        codigo = vals[0]
+        self._abrir_janela_edicao(codigo)
+
+    def ui_remover_selecionado(self):
+        sel = self.tree_main.selection()
+        if not sel:
+            messagebox.showwarning("Atenção", "Selecione um produto na lista.")
+            return
+        vals = self.tree_main.item(sel[0], "values")
+        codigo, nome = vals[0], vals[1]
+        if messagebox.askyesno("Confirma", f"Remover o produto '{nome}' (código {codigo})?"):
+            remover_produto(self.conn, codigo)
+            self.atualizar_tabela_principal()
+
+    def _on_double_click_row(self, event):
+        sel = self.tree_main.selection()
+        if not sel:
+            return
+        vals = self.tree_main.item(sel[0], "values")
+        codigo = vals[0]
+        # preencher campo de baixa para rapidez
+        self.entry_codigo_baixa = getattr(self, "entry_codigo_baixa", None)
+        if not self.entry_codigo_baixa:
+            # criar campo temporário se não existir (aba cadastro has its own fields)
+            self.entry_codigo_baixa = tk.Entry(self.aba_estoque)
+            self.entry_codigo_baixa.pack_forget()
+        # abrir janela de edição
+        self._abrir_janela_edicao(codigo)
+
+    # Janela para dar baixa pedida manualmente (usa dialog interno)
+    def _abrir_janela_baixa(self, codigo_inicial=None):
+        janela = tk.Toplevel(self.root)
+        janela.title("Dar Baixa")
+        janela.geometry("380x200")
+        janela.configure(bg=self.COR_BG)
+
+        tk.Label(janela, text="Código:", bg=self.COR_BG, fg=self.COR_TEXT).pack(anchor="w", padx=12, pady=(12,4))
+        entry_cod = tk.Entry(janela, width=28)
+        entry_cod.pack(padx=12)
+        if codigo_inicial:
+            entry_cod.insert(0, codigo_inicial)
+
+        tk.Label(janela, text="Quantidade a baixar:", bg=self.COR_BG, fg=self.COR_TEXT).pack(anchor="w", padx=12, pady=(8,4))
+        entry_qtd = tk.Entry(janela, width=12)
+        entry_qtd.pack(padx=12)
+
+        def confirmar():
+            cod = entry_cod.get().strip()
+            qtd_str = entry_qtd.get().strip()
+            if not cod or not qtd_str:
+                messagebox.showwarning("Atenção", "Preencha os campos.")
+                return
+            try:
+                qtd = int(qtd_str)
+            except ValueError:
+                messagebox.showerror("Erro", "Quantidade inválida.")
+                return
+            prod = buscar_produto(self.conn, cod)
+            if not prod:
+                messagebox.showerror("Erro", "Produto não encontrado.")
+                return
+            _, nome, qtd_atual = prod
+            if qtd_atual < qtd:
+                messagebox.showwarning("Erro", "Quantidade insuficiente.")
+                return
+            atualizar_produto(self.conn, cod, quantidade=qtd_atual - qtd)
+            messagebox.showinfo("Sucesso", f"Baixa aplicada. Novo estoque de {nome}: {qtd_atual - qtd}")
+            janela.destroy()
+            self.atualizar_tabela_principal()
+
+        tk.Button(janela, text="Confirmar", bg=self.COR_ACCENT, fg="black", command=confirmar).pack(pady=12)
+
+    # Janela para editar nome/quantidade
+    def _abrir_janela_edicao(self, codigo):
+        prod = buscar_produto(self.conn, codigo)
+        if not prod:
+            messagebox.showerror("Erro", "Produto não encontrado.")
+            return
+        cod, nome, qtd = prod
+        janela = tk.Toplevel(self.root)
+        janela.title(f"Editar - {cod}")
+        janela.geometry("460x240")
+        janela.configure(bg=self.COR_BG)
+
+        tk.Label(janela, text="Código:", bg=self.COR_BG, fg=self.COR_TEXT).pack(anchor="w", padx=12, pady=(12,4))
+        lbl_cod = tk.Label(janela, text=cod, bg=self.COR_BG, fg=self.COR_ACCENT, font=("Arial", 11, "bold"))
+        lbl_cod.pack(anchor="w", padx=12)
+
+        tk.Label(janela, text="Nome:", bg=self.COR_BG, fg=self.COR_TEXT).pack(anchor="w", padx=12, pady=(8,4))
+        entry_nome = tk.Entry(janela, width=48)
+        entry_nome.insert(0, nome)
+        entry_nome.pack(padx=12)
+
+        tk.Label(janela, text="Quantidade:", bg=self.COR_BG, fg=self.COR_TEXT).pack(anchor="w", padx=12, pady=(8,4))
+        entry_qtd = tk.Entry(janela, width=12)
+        entry_qtd.insert(0, str(qtd))
+        entry_qtd.pack(padx=12)
+
+        def salvar_edicao():
+            novo_nome = entry_nome.get().strip()
+            qtd_str = entry_qtd.get().strip()
+            if not novo_nome or not qtd_str:
+                messagebox.showwarning("Atenção", "Preencha todos os campos.")
+                return
+            try:
+                nova_qtd = int(qtd_str)
+                if nova_qtd < 0:
+                    raise ValueError
+            except ValueError:
+                messagebox.showerror("Erro", "Quantidade inválida.")
+                return
+            atualizar_produto(self.conn, cod, nome=novo_nome, quantidade=nova_qtd)
+            messagebox.showinfo("Sucesso", "Produto atualizado.")
+            janela.destroy()
+            self.atualizar_tabela_principal()
+
+        tk.Button(janela, text="Salvar Alterações", bg="#4CAF50", fg="white", command=salvar_edicao).pack(pady=10)
+        tk.Button(janela, text="Cancelar", bg="#9E9E9E", fg="white", command=janela.destroy).pack()
+
+    # Relatórios UI
+    def ui_relatorio_completo(self):
+        dados = listar_produtos(self.conn)
+        self._abrir_janela_relatorio("Relatório Completo", dados)
+
+    def ui_relatorio_baixo(self):
+        dados = listar_estoque_baixo(self.conn)
+        self._abrir_janela_relatorio(f"Estoque Baixo (<= {LOW_STOCK_LIMIT})", dados)
+
+    def _abrir_janela_relatorio(self, titulo, dados):
+        janela = tk.Toplevel(self.root)
+        janela.title(titulo)
+        janela.geometry("760x460")
+        janela.configure(bg=self.COR_BG)
+
+        tk.Label(janela, text=titulo, bg=self.COR_BG, fg=self.COR_ACCENT, font=("Arial", 12, "bold")).pack(anchor="w", padx=12, pady=8)
+
+        tree = ttk.Treeview(janela, columns=("codigo", "nome", "quantidade"), show="headings")
+        tree.heading("codigo", text="Código")
+        tree.heading("nome", text="Nome")
+        tree.heading("quantidade", text="Quantidade")
+        tree.pack(fill="both", expand=True, padx=12, pady=8)
+
+        for cod, nome, qtd in dados:
+            tree.insert("", "end", values=(cod, nome, qtd))
+
+        tk.Button(janela, text="Fechar", bg="#9E9E9E", fg="white", command=janela.destroy).pack(pady=6)
+
+    def _exportar_csv(self, tipo="completo"):
+        if tipo == "completo":
+            dados = listar_produtos(self.conn)
+            nome_arquivo = "relatorio_completo.csv"
+        else:
+            dados = listar_estoque_baixo(self.conn)
+            nome_arquivo = "relatorio_baixo.csv"
+        try:
+            with open(nome_arquivo, "w", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)
+                writer.writerow(["Código", "Nome", "Quantidade"])
+                writer.writerows(dados)
+            messagebox.showinfo("Exportado", f"Relatório salvo em: {nome_arquivo}")
+        except Exception as e:
+            messagebox.showerror("Erro", f"Falha ao exportar CSV: {e}")
+
+    # Helpers
+    def _limpar_campos_cadastro(self):
+        self.entry_cod.delete(0, tk.END)
+        self.entry_nome.delete(0, tk.END)
+        self.entry_qtd.delete(0, tk.END)
+
+# ---------------------------
+# Main
+# ---------------------------
+def main():
+    conn = conectar_banco()
+    raiz = tk.Tk()
+    app = SistemaEstoque(raiz, conn)
+    raiz.mainloop()
+    conn.close()
+
+if __name__ == "__main__":
+    main()
