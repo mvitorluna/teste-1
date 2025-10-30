@@ -1,246 +1,382 @@
+"""
+sistema_estoque_brbrasil.py
+Sistema de Estoque com visual inspirado no site BR Brasil.
+- Persistência: SQLite (estoque.db)
+- Tenta carregar 'logo.png' na mesma pasta (opcional)
+- Layout com cores da empresa: azul principal e variações
+"""
+
+import os
+import sqlite3
 import tkinter as tk
 from tkinter import ttk, messagebox
-import json
-import os
 
-# ==========================================================
-# SISTEMA DE CONTROLE DE ESTOQUE COMPLETO (v3)
-# Agora com: persistência + baixa de estoque + relatórios
-# ==========================================================
+DB_FILE = "estoque.db"
 
-ARQUIVO_ESTOQUE = "estoque.json"
+# ----------------------------
+# Banco: conexão e CRUD simples
+# ----------------------------
+def conectar_banco():
+    """Conecta ao SQLite e garante a tabela 'produtos'."""
+    conn = sqlite3.connect(DB_FILE)
+    conn.execute(
+        """CREATE TABLE IF NOT EXISTS produtos (
+               codigo TEXT PRIMARY KEY,
+               nome   TEXT NOT NULL,
+               quantidade INTEGER NOT NULL
+           )"""
+    )
+    conn.commit()
+    return conn
 
-# ----------------------------------------------------------
-# Funções para salvar e carregar dados
-# ----------------------------------------------------------
-def carregar_estoque():
-    if os.path.exists(ARQUIVO_ESTOQUE):
-        try:
-            with open(ARQUIVO_ESTOQUE, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            messagebox.showwarning("Erro", "Arquivo de dados corrompido. Criando novo estoque...")
-            return []
-    return []
 
-def salvar_estoque():
-    with open(ARQUIVO_ESTOQUE, "w", encoding="utf-8") as f:
-        json.dump(estoque, f, indent=4, ensure_ascii=False)
+def inserir_produto(conn, codigo, nome, quantidade):
+    """Insere produto; retorna True se inseriu, False se código duplicado."""
+    try:
+        with conn:
+            conn.execute("INSERT INTO produtos (codigo, nome, quantidade) VALUES (?, ?, ?)",
+                         (codigo, nome, quantidade))
+        return True
+    except sqlite3.IntegrityError:
+        return False
 
-# ----------------------------------------------------------
-# Carrega o estoque salvo
-# ----------------------------------------------------------
-estoque = carregar_estoque()
 
-# ----------------------------------------------------------
-# Atualiza tabela
-# ----------------------------------------------------------
-def atualizar_tabela(tabela, filtro=None):
-    tabela.delete(*tabela.get_children())
-    for produto in estoque:
-        if not filtro or filtro.lower() in produto["nome"].lower() or filtro.lower() in produto["codigo"].lower():
-            tabela.insert("", "end", values=(produto["codigo"], produto["nome"], produto["quantidade"]))
+def atualizar_produto_qtd(conn, codigo, nova_qtd):
+    """Atualiza quantidade de produto identificado por código."""
+    with conn:
+        conn.execute("UPDATE produtos SET quantidade = ? WHERE codigo = ?", (nova_qtd, codigo))
 
-# ----------------------------------------------------------
-# JANELA: Cadastro
-# ----------------------------------------------------------
-def janela_cadastro():
-    cadastro = tk.Toplevel(root)
-    cadastro.title("📦 Cadastro de Produtos")
-    cadastro.geometry("480x350")
-    cadastro.configure(bg="#f4f7ff")
 
-    tk.Label(cadastro, text="CADASTRAR PRODUTO", font=("Arial", 15, "bold"), bg="#3F51B5", fg="white", pady=10).pack(fill="x")
+def buscar_produto_por_codigo(conn, codigo):
+    """Retorna tupla (codigo, nome, quantidade) ou None."""
+    cur = conn.execute("SELECT codigo, nome, quantidade FROM produtos WHERE codigo = ?", (codigo,))
+    return cur.fetchone()
 
-    frame = tk.Frame(cadastro, bg="#f4f7ff")
-    frame.pack(pady=20)
 
-    tk.Label(frame, text="Código:", bg="#f4f7ff", font=("Arial", 11)).grid(row=0, column=0, padx=5, pady=5)
-    e_codigo = tk.Entry(frame, width=30)
-    e_codigo.grid(row=0, column=1, padx=5, pady=5)
+def listar_produtos(conn, filtro=None):
+    """Retorna lista de produtos; filtro por nome/codigo opcional."""
+    cur = conn.cursor()
+    if filtro:
+        chave = f"%{filtro}%"
+        cur.execute("SELECT codigo, nome, quantidade FROM produtos WHERE nome LIKE ? OR codigo LIKE ?",
+                    (chave, chave))
+    else:
+        cur.execute("SELECT codigo, nome, quantidade FROM produtos")
+    return cur.fetchall()
 
-    tk.Label(frame, text="Nome:", bg="#f4f7ff", font=("Arial", 11)).grid(row=1, column=0, padx=5, pady=5)
-    e_nome = tk.Entry(frame, width=30)
-    e_nome.grid(row=1, column=1, padx=5, pady=5)
 
-    tk.Label(frame, text="Quantidade:", bg="#f4f7ff", font=("Arial", 11)).grid(row=2, column=0, padx=5, pady=5)
-    e_qtd = tk.Entry(frame, width=30)
-    e_qtd.grid(row=2, column=1, padx=5, pady=5)
+def listar_estoque_baixo(conn, limite=5):
+    """Retorna produtos com quantidade <= limite."""
+    cur = conn.execute("SELECT codigo, nome, quantidade FROM produtos WHERE quantidade <= ?", (limite,))
+    return cur.fetchall()
 
-    def salvar_produto():
-        codigo = e_codigo.get().strip()
-        nome = e_nome.get().strip()
-        qtd = e_qtd.get().strip()
 
-        if not codigo or not nome or not qtd:
-            messagebox.showwarning("⚠️", "Preencha todos os campos!")
-            return
+# ----------------------------
+# Utilitários de UI / validação
+# ----------------------------
+def valida_inteiro(valor_str):
+    """Tenta converter para inteiro; retorna int ou None."""
+    try:
+        return int(valor_str)
+    except (ValueError, TypeError):
+        return None
 
-        if any(p["codigo"] == codigo for p in estoque):
-            messagebox.showerror("Erro", "Já existe um produto com esse código!")
-            return
 
-        try:
-            qtd = int(qtd)
-        except ValueError:
-            messagebox.showerror("Erro", "Quantidade inválida!")
-            return
+# ----------------------------
+# Interface (Tkinter)
+# ----------------------------
+class SistemaEstoqueApp:
+    """Aplicação principal - encapsula a interface e ações."""
 
-        estoque.append({"codigo": codigo, "nome": nome, "quantidade": qtd})
-        salvar_estoque()
-        e_codigo.delete(0, tk.END)
-        e_nome.delete(0, tk.END)
-        e_qtd.delete(0, tk.END)
-        messagebox.showinfo("✅", f"Produto '{nome}' cadastrado com sucesso!")
+    def __init__(self, root, conexao):
+        self.root = root
+        self.conn = conexao
 
-    tk.Button(cadastro, text="Salvar Produto", bg="#4CAF50", fg="white", font=("Arial", 11, "bold"), width=18, command=salvar_produto).pack(pady=10)
-    tk.Button(cadastro, text="Fechar", bg="#9E9E9E", fg="white", width=18, command=cadastro.destroy).pack()
+        # Paleta inspirada no site BR Brasil
+        self.COR_PRINCIPAL = "#1976D2"   # azul escuro
+        self.COR_SECUNDARIA = "#1E88E5"  # azul claro
+        self.COR_ACCENT = "#FF9800"      # laranja (para alertas)
+        self.FUNDO = "#E3F2FD"
 
-# ----------------------------------------------------------
-# JANELA: Dar Baixa no Estoque
-# ----------------------------------------------------------
-def janela_baixa():
-    baixa = tk.Toplevel(root)
-    baixa.title("📉 Dar Baixa no Estoque")
-    baixa.geometry("480x300")
-    baixa.configure(bg="#f4f7ff")
+        self._config_root()
+        self._criar_header()
+        self._criar_corpo()
+        self._criar_footer()
 
-    tk.Label(baixa, text="DAR BAIXA NO ESTOQUE", font=("Arial", 15, "bold"), bg="#9C27B0", fg="white", pady=10).pack(fill="x")
+        # Preenche tabela inicial
+        self.atualizar_tabela_principal()
 
-    frame = tk.Frame(baixa, bg="#f4f7ff")
-    frame.pack(pady=20)
+    def _config_root(self):
+        self.root.title("BR Brasil - Sistema de Controle de Estoque")
+        self.root.geometry("820x560")
+        self.root.configure(bg=self.FUNDO)
 
-    tk.Label(frame, text="Código do produto:", bg="#f4f7ff").grid(row=0, column=0, padx=5, pady=5)
-    e_codigo = tk.Entry(frame, width=30)
-    e_codigo.grid(row=0, column=1)
+    def _criar_header(self):
+        header = tk.Frame(self.root, bg=self.COR_PRINCIPAL, padx=10, pady=8)
+        header.pack(fill="x")
 
-    tk.Label(frame, text="Quantidade a dar baixa:", bg="#f4f7ff").grid(row=1, column=0, padx=5, pady=5)
-    e_qtd = tk.Entry(frame, width=30)
-    e_qtd.grid(row=1, column=1)
-
-    def dar_baixa():
-        codigo = e_codigo.get().strip()
-        qtd = e_qtd.get().strip()
-
-        if not codigo or not qtd:
-            messagebox.showwarning("⚠️", "Preencha todos os campos!")
-            return
-
-        try:
-            qtd = int(qtd)
-        except ValueError:
-            messagebox.showerror("Erro", "Quantidade inválida!")
-            return
-
-        for p in estoque:
-            if p["codigo"] == codigo:
-                if p["quantidade"] >= qtd:
-                    p["quantidade"] -= qtd
-                    salvar_estoque()
-                    messagebox.showinfo("✅", f"Baixa realizada com sucesso!\nNovo estoque: {p['quantidade']}")
-                else:
-                    messagebox.showwarning("Erro", "Quantidade em estoque insuficiente!")
-                break
+        # Logo (tenta carregar logo.png)
+        logo_path = "logo.png"
+        if os.path.exists(logo_path):
+            try:
+                # PhotoImage suporta PNG direto
+                self.logo_img = tk.PhotoImage(file=logo_path)
+                # ajustar tamanho se necessário: PhotoImage subsample
+                # aqui fazemos subsample automático se muito grande
+                w, h = self.logo_img.width(), self.logo_img.height()
+                if w > 200:
+                    factor = int(w / 180) + 1
+                    self.logo_img = self.logo_img.subsample(factor, factor)
+                lbl_logo = tk.Label(header, image=self.logo_img, bg=self.COR_PRINCIPAL)
+                lbl_logo.pack(side="left", padx=(6, 12))
+            except Exception:
+                # falha ao abrir imagem -> fallback para texto
+                tk.Label(header, text="BR Brasil", bg=self.COR_PRINCIPAL,
+                         fg="white", font=("Arial", 18, "bold")).pack(side="left", padx=12)
         else:
-            messagebox.showerror("Erro", "Produto não encontrado!")
+            # Fallback: texto estilizado com o nome da empresa
+            tk.Label(header, text="BR Brasil", bg=self.COR_PRINCIPAL,
+                     fg="white", font=("Arial", 20, "bold")).pack(side="left", padx=12)
 
-    tk.Button(baixa, text="Confirmar Baixa", bg="#9C27B0", fg="white", width=18, command=dar_baixa).pack(pady=10)
-    tk.Button(baixa, text="Fechar", bg="#9E9E9E", fg="white", width=18, command=baixa.destroy).pack()
+        tk.Label(header, text="Sistema de Controle de Estoque",
+                 bg=self.COR_PRINCIPAL, fg="white", font=("Arial", 16)).pack(side="left", padx=6)
 
-# ----------------------------------------------------------
-# JANELA: Consulta / Pesquisa
-# ----------------------------------------------------------
-def janela_consulta():
-    consulta = tk.Toplevel(root)
-    consulta.title("🔍 Consulta de Produtos")
-    consulta.geometry("600x400")
-    consulta.configure(bg="#f4f7ff")
+    def _criar_corpo(self):
+        # frame principal dividido em esquerda (form) e direita (tabela)
+        main_frame = tk.Frame(self.root, bg=self.FUNDO)
+        main_frame.pack(fill="both", expand=True, padx=12, pady=10)
 
-    tk.Label(consulta, text="CONSULTAR PRODUTOS", font=("Arial", 15, "bold"), bg="#2196F3", fg="white", pady=10).pack(fill="x")
+        # === LADO ESQUERDO: Formulário rápido (cadastrar / baixa) ===
+        left_frame = tk.Frame(main_frame, bg=self.FUNDO)
+        left_frame.pack(side="left", fill="y", padx=(0, 10))
 
-    frame_busca = tk.Frame(consulta, bg="#f4f7ff")
-    frame_busca.pack(pady=10)
+        # Card: Cadastrar Produto
+        card_cadastrar = tk.LabelFrame(left_frame, text="Cadastrar Produto", bg=self.FUNDO, padx=10, pady=8)
+        card_cadastrar.pack(fill="x", pady=(0, 10))
 
-    tk.Label(frame_busca, text="Pesquisar:", bg="#f4f7ff").grid(row=0, column=0, padx=5)
-    entrada_pesquisa = tk.Entry(frame_busca, width=30)
-    entrada_pesquisa.grid(row=0, column=1, padx=5)
+        tk.Label(card_cadastrar, text="Código:", bg=self.FUNDO).grid(row=0, column=0, sticky="w")
+        self.entry_codigo = tk.Entry(card_cadastrar, width=24)
+        self.entry_codigo.grid(row=0, column=1, pady=6, padx=6)
 
-    colunas = ("Código", "Nome", "Quantidade")
-    tabela = ttk.Treeview(consulta, columns=colunas, show="headings")
-    for c in colunas:
-        tabela.heading(c, text=c)
-    tabela.pack(fill="both", expand=True, pady=10)
+        tk.Label(card_cadastrar, text="Nome:", bg=self.FUNDO).grid(row=1, column=0, sticky="w")
+        self.entry_nome = tk.Entry(card_cadastrar, width=24)
+        self.entry_nome.grid(row=1, column=1, pady=6, padx=6)
 
-    atualizar_tabela(tabela)
+        tk.Label(card_cadastrar, text="Quantidade:", bg=self.FUNDO).grid(row=2, column=0, sticky="w")
+        self.entry_qtd = tk.Entry(card_cadastrar, width=12)
+        self.entry_qtd.grid(row=2, column=1, pady=6, padx=6, sticky="w")
 
-    tk.Button(frame_busca, text="Pesquisar", bg="#2196F3", fg="white", command=lambda: atualizar_tabela(tabela, entrada_pesquisa.get())).grid(row=0, column=2, padx=5)
-    tk.Button(consulta, text="Fechar", bg="#9E9E9E", fg="white", width=18, command=consulta.destroy).pack(pady=5)
+        btn_cadastrar = tk.Button(card_cadastrar, text="Salvar", bg=self.COR_SECUNDARIA, fg="white",
+                                 width=20, command=self.action_cadastrar)
+        btn_cadastrar.grid(row=3, column=0, columnspan=2, pady=(8, 2))
 
-# ----------------------------------------------------------
-# JANELA: Relatório de Estoque Baixo
-# ----------------------------------------------------------
-def janela_estoque_baixo():
-    relatorio = tk.Toplevel(root)
-    relatorio.title("⚠️ Estoque Baixo")
-    relatorio.geometry("500x350")
-    relatorio.configure(bg="#fff8f0")
+        # Card: Dar Baixa (usa campos do mesmo formulário por simplicidade)
+        card_baixa = tk.LabelFrame(left_frame, text="Dar Baixa (venda / saída)", bg=self.FUNDO, padx=10, pady=8)
+        card_baixa.pack(fill="x", pady=(0, 10))
 
-    tk.Label(relatorio, text="PRODUTOS COM ESTOQUE BAIXO", font=("Arial", 15, "bold"), bg="#FF9800", fg="white", pady=10).pack(fill="x")
+        tk.Label(card_baixa, text="Código:", bg=self.FUNDO).grid(row=0, column=0, sticky="w")
+        self.entry_codigo_baixa = tk.Entry(card_baixa, width=20)
+        self.entry_codigo_baixa.grid(row=0, column=1, pady=6, padx=6)
 
-    colunas = ("Código", "Nome", "Quantidade")
-    tabela = ttk.Treeview(relatorio, columns=colunas, show="headings")
-    for c in colunas:
-        tabela.heading(c, text=c)
-    tabela.pack(fill="both", expand=True, pady=10)
+        tk.Label(card_baixa, text="Quantidade:", bg=self.FUNDO).grid(row=1, column=0, sticky="w")
+        self.entry_qtd_baixa = tk.Entry(card_baixa, width=20)
+        self.entry_qtd_baixa.grid(row=1, column=1, pady=6, padx=6)
 
-    for p in estoque:
-        if p["quantidade"] <= 5:
-            tabela.insert("", "end", values=(p["codigo"], p["nome"], p["quantidade"]))
+        btn_baixa = tk.Button(card_baixa, text="Aplicar Baixa", bg=self.COR_ACCENT, fg="white",
+                              width=20, command=self.action_dar_baixa)
+        btn_baixa.grid(row=2, column=0, columnspan=2, pady=(8, 2))
 
-    tk.Button(relatorio, text="Fechar", bg="#9E9E9E", fg="white", width=18, command=relatorio.destroy).pack(pady=10)
+        # Botões utilitários
+        util_frame = tk.Frame(left_frame, bg=self.FUNDO)
+        util_frame.pack(fill="x", pady=(4, 0))
 
-# ----------------------------------------------------------
-# JANELA: Relatório Geral
-# ----------------------------------------------------------
-def janela_relatorio_geral():
-    relatorio = tk.Toplevel(root)
-    relatorio.title("📋 Relatório Geral")
-    relatorio.geometry("600x400")
-    relatorio.configure(bg="#f4f7ff")
+        tk.Button(util_frame, text="Pesquisar...", bg=self.COR_PRINCIPAL, fg="white", width=18,
+                  command=self.abrir_janela_pesquisa).pack(pady=6)
+        tk.Button(util_frame, text="Estoque Baixo", bg=self.COR_ACCENT, fg="white", width=18,
+                  command=self.abrir_relatorio_baixo).pack(pady=6)
+        tk.Button(util_frame, text="Relatório Geral", bg="#607D8B", fg="white", width=18,
+                  command=self.abrir_relatorio_geral).pack(pady=6)
 
-    tk.Label(relatorio, text="RELATÓRIO GERAL DO ESTOQUE", font=("Arial", 15, "bold"), bg="#607D8B", fg="white", pady=10).pack(fill="x")
+        # === LADO DIREITO: Tabela principal (lista de produtos) ===
+        right_frame = tk.Frame(main_frame, bg=self.FUNDO)
+        right_frame.pack(side="left", fill="both", expand=True)
 
-    colunas = ("Código", "Nome", "Quantidade")
-    tabela = ttk.Treeview(relatorio, columns=colunas, show="headings")
-    for c in colunas:
-        tabela.heading(c, text=c)
-    tabela.pack(fill="both", expand=True, pady=10)
+        lbl_table = tk.Label(right_frame, text="Estoque Atual", bg=self.FUNDO, font=("Arial", 12, "bold"))
+        lbl_table.pack(anchor="w", padx=(6, 0))
 
-    for p in estoque:
-        tabela.insert("", "end", values=(p["codigo"], p["nome"], p["quantidade"]))
+        cols = ("codigo", "nome", "quantidade")
+        self.tree = ttk.Treeview(right_frame, columns=cols, show="headings", height=18)
+        self.tree.heading("codigo", text="Código")
+        self.tree.heading("nome", text="Nome")
+        self.tree.heading("quantidade", text="Qtd")
+        self.tree.column("codigo", width=120, anchor="center")
+        self.tree.column("nome", width=420)
+        self.tree.column("quantidade", width=80, anchor="center")
+        self.tree.pack(fill="both", expand=True, padx=6, pady=6)
 
-    tk.Button(relatorio, text="Fechar", bg="#9E9E9E", fg="white", width=18, command=relatorio.destroy).pack(pady=10)
+        # Scrollbar vertical
+        vsb = ttk.Scrollbar(right_frame, orient="vertical", command=self.tree.yview)
+        self.tree.configure(yscroll=vsb.set)
+        vsb.pack(side="right", fill="y", pady=6)
 
-# ----------------------------------------------------------
-# TELA PRINCIPAL
-# ----------------------------------------------------------
-root = tk.Tk()
-root.title("📊 Sistema de Controle de Estoque")
-root.geometry("480x480")
-root.configure(bg="#E3F2FD")
+        # Duplo clique para preencher formulário de baixa automaticamente
+        self.tree.bind("<Double-1>", self._on_item_double_click)
 
-tk.Label(root, text="SISTEMA DE ESTOQUE", font=("Arial", 16, "bold"), bg="#1976D2", fg="white", pady=12).pack(fill="x")
+    def _criar_footer(self):
+        footer = tk.Frame(self.root, bg=self.COR_PRINCIPAL)
+        footer.pack(fill="x", side="bottom")
+        tk.Label(footer, text="© 2025 - BR Brasil - Sistema de Estoque", bg=self.COR_PRINCIPAL,
+                 fg="white", pady=8).pack()
 
-frame_botoes = tk.Frame(root, bg="#E3F2FD")
-frame_botoes.pack(expand=True, pady=20)
+    # ========================= Ações =========================
+    def action_cadastrar(self):
+        codigo = self.entry_codigo.get().strip()
+        nome = self.entry_nome.get().strip()
+        qtd_str = self.entry_qtd.get().strip()
 
-tk.Button(frame_botoes, text="📦 Cadastrar Produto", bg="#4CAF50", fg="white", font=("Arial", 12, "bold"), width=25, command=janela_cadastro).pack(pady=6)
-tk.Button(frame_botoes, text="📉 Dar Baixa", bg="#9C27B0", fg="white", font=("Arial", 12, "bold"), width=25, command=janela_baixa).pack(pady=6)
-tk.Button(frame_botoes, text="🔍 Consultar Produtos", bg="#2196F3", fg="white", font=("Arial", 12, "bold"), width=25, command=janela_consulta).pack(pady=6)
-tk.Button(frame_botoes, text="⚠️ Estoque Baixo", bg="#FF9800", fg="white", font=("Arial", 12, "bold"), width=25, command=janela_estoque_baixo).pack(pady=6)
-tk.Button(frame_botoes, text="📋 Relatório Geral", bg="#607D8B", fg="white", font=("Arial", 12, "bold"), width=25, command=janela_relatorio_geral).pack(pady=6)
-tk.Button(frame_botoes, text="🚪 Sair", bg="#E53935", fg="white", font=("Arial", 12, "bold"), width=25, command=root.destroy).pack(pady=6)
+        if not codigo or not nome or not qtd_str:
+            messagebox.showwarning("Atenção", "Preencha todos os campos para cadastrar.")
+            return
 
-tk.Label(root, text="© 2025 - Sistema de Estoque | Python 🐍", bg="#1976D2", fg="white", pady=6).pack(fill="x", side="bottom")
+        qtd = valida_inteiro(qtd_str)
+        if qtd is None:
+            messagebox.showerror("Erro", "Quantidade inválida.")
+            return
 
-root.mainloop()
+        ok = inserir_produto(self.conn, codigo, nome, qtd)
+        if not ok:
+            messagebox.showerror("Erro", f"Código '{codigo}' já cadastrado.")
+            return
+
+        messagebox.showinfo("Sucesso", f"Produto '{nome}' cadastrado.")
+        self._limpar_campos_cadastro()
+        self.atualizar_tabela_principal()
+
+    def action_dar_baixa(self):
+        codigo = self.entry_codigo_baixa.get().strip()
+        qtd_str = self.entry_qtd_baixa.get().strip()
+
+        if not codigo or not qtd_str:
+            messagebox.showwarning("Atenção", "Preencha código e quantidade para dar baixa.")
+            return
+
+        qtd = valida_inteiro(qtd_str)
+        if qtd is None or qtd <= 0:
+            messagebox.showerror("Erro", "Quantidade inválida.")
+            return
+
+        produto = buscar_produto_por_codigo(self.conn, codigo)
+        if not produto:
+            messagebox.showerror("Erro", "Produto não encontrado.")
+            return
+
+        _, nome, qtd_atual = produto
+        if qtd_atual < qtd:
+            messagebox.showwarning("Aviso", f"Estoque insuficiente (atual: {qtd_atual}).")
+            return
+
+        nova_qtd = qtd_atual - qtd
+        atualizar_produto_qtd(self.conn, codigo, nova_qtd)
+        messagebox.showinfo("Sucesso", f"Baixa aplicada. Novo estoque de '{nome}': {nova_qtd}")
+        self.entry_codigo_baixa.delete(0, tk.END)
+        self.entry_qtd_baixa.delete(0, tk.END)
+        self.atualizar_tabela_principal()
+
+    def atualizar_tabela_principal(self):
+        dados = listar_produtos(self.conn)
+        # atualizar Treeview
+        for i in self.tree.get_children():
+            self.tree.delete(i)
+        for codigo, nome, quantidade in dados:
+            self.tree.insert("", "end", values=(codigo, nome, quantidade))
+
+    def abrir_janela_pesquisa(self):
+        janela = tk.Toplevel(self.root)
+        janela.title("Pesquisar Produtos")
+        janela.geometry("640x420")
+        janela.configure(bg=self.FUNDO)
+
+        tk.Label(janela, text="Pesquisar por nome ou código:", bg=self.FUNDO).pack(anchor="w", padx=10, pady=6)
+        entrada = tk.Entry(janela, width=48)
+        entrada.pack(padx=10, pady=4)
+
+        tree = ttk.Treeview(janela, columns=("codigo", "nome", "quantidade"), show="headings")
+        tree.heading("codigo", text="Código")
+        tree.heading("nome", text="Nome")
+        tree.heading("quantidade", text="Quantidade")
+        tree.pack(fill="both", expand=True, padx=10, pady=8)
+
+        def pesquisar():
+            termo = entrada.get().strip()
+            resultados = listar_produtos(self.conn, termo)
+            for i in tree.get_children():
+                tree.delete(i)
+            for cod, nome, qtd in resultados:
+                tree.insert("", "end", values=(cod, nome, qtd))
+
+        tk.Button(janela, text="Pesquisar", bg=self.COR_PRINCIPAL, fg="white", command=pesquisar).pack(pady=6)
+
+    def abrir_relatorio_baixo(self):
+        janela = tk.Toplevel(self.root)
+        janela.title("Relatório - Estoque Baixo")
+        janela.geometry("620x380")
+        janela.configure(bg=self.FUNDO)
+
+        tk.Label(janela, text="Produtos com estoque baixo (<= 5)", bg=self.FUNDO, font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=8)
+
+        tree = ttk.Treeview(janela, columns=("codigo", "nome", "quantidade"), show="headings")
+        tree.heading("codigo", text="Código")
+        tree.heading("nome", text="Nome")
+        tree.heading("quantidade", text="Quantidade")
+        tree.pack(fill="both", expand=True, padx=8, pady=8)
+
+        dados = listar_estoque_baixo(self.conn, limite=5)
+        for cod, nome, qtd in dados:
+            tree.insert("", "end", values=(cod, nome, qtd))
+
+    def abrir_relatorio_geral(self):
+        janela = tk.Toplevel(self.root)
+        janela.title("Relatório Geral")
+        janela.geometry("760x460")
+        janela.configure(bg=self.FUNDO)
+
+        tk.Label(janela, text="Relatório Completo - Todos os Materiais", bg=self.FUNDO, font=("Arial", 12, "bold")).pack(anchor="w", padx=8, pady=8)
+
+        tree = ttk.Treeview(janela, columns=("codigo", "nome", "quantidade"), show="headings")
+        tree.heading("codigo", text="Código")
+        tree.heading("nome", text="Nome")
+        tree.heading("quantidade", text="Quantidade")
+        tree.pack(fill="both", expand=True, padx=8, pady=8)
+
+        for cod, nome, qtd in listar_produtos(self.conn):
+            tree.insert("", "end", values=(cod, nome, qtd))
+
+    def _on_item_double_click(self, event):
+        """Quando o usuário dá duplo clique na tabela principal, copia código para o campo de baixa."""
+        item = self.tree.selection()
+        if not item:
+            return
+        values = self.tree.item(item[0], "values")
+        codigo = values[0]
+        self.entry_codigo_baixa.delete(0, tk.END)
+        self.entry_codigo_baixa.insert(0, codigo)
+
+    def _limpar_campos_cadastro(self):
+        self.entry_codigo.delete(0, tk.END)
+        self.entry_nome.delete(0, tk.END)
+        self.entry_qtd.delete(0, tk.END)
+
+
+# ----------------------------
+# Inicialização da aplicação
+# ----------------------------
+def main():
+    conexao = conectar_banco()
+    root = tk.Tk()
+    app = SistemaEstoqueApp(root, conexao)
+    root.mainloop()
+    conexao.close()
+
+
+if __name__ == "__main__":
+    main()
