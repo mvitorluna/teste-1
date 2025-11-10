@@ -5,27 +5,22 @@
    ---------------------------------------------
    PROJETO: Sistema de Academia
    OBJETIVO: Cadastrar alunos, calcular IMC e mostrar resultados.
-   FEITO POR: (seu nome aqui)
+   FEITO POR: Marcos Vitor Olivera De Luna
    PROFESSOR: Eros Leon Kohler
    DISCIPLINA: Algoritmos e Lógica de Programação
    ---------------------------------------------
 */
 
-// Estrutura (struct) para guardar os dados de cada aluno
 struct Aluno {
-    char nome[50];   // Nome do aluno
-    int idade;       // Idade do aluno
-    float peso;      // Peso em kg
-    float altura;    // Altura em metros
-    float imc;       // IMC calculado
+    char nome[50];
+    int idade;
+    float peso, altura, imc;
 };
-
-// Função que calcula o IMC com base no peso e altura
+// Função 01
 float calcularIMC(float peso, float altura) {
     return peso / (altura * altura);
 }
-
-// Função que mostra o status do IMC (peso normal, obesidade etc.)
+// Função 02
 void mostrarStatus(float imc) {
     if (imc < 18.5)
         printf(" - Abaixo do peso\n");
@@ -37,63 +32,11 @@ void mostrarStatus(float imc) {
         printf(" - Obesidade\n");
 }
 
-// Função para cadastrar um novo aluno
-int cadastrarAluno(struct Aluno alunos[], int qtd) {
-    if (qtd >= 100) { // limita a 100 alunos
-        printf("\nLimite de alunos atingido!\n");
-        return qtd;
-    }
-
-    printf("\n=== Cadastro de Aluno ===\n");
-    printf("Nome: ");
-    getchar(); // limpa o buffer do teclado
-    fgets(alunos[qtd].nome, 50, stdin); // lê o nome com espaços
-    alunos[qtd].nome[strcspn(alunos[qtd].nome, "\n")] = '\0'; // remove o '\n' do final
-
-    printf("Idade: ");
-    scanf("%d", &alunos[qtd].idade);
-
-    printf("Peso (kg): ");
-    scanf("%f", &alunos[qtd].peso);
-
-    printf("Altura (m): ");
-    scanf("%f", &alunos[qtd].altura);
-
-    // Verifica se os valores são válidos
-    if (alunos[qtd].peso <= 0 || alunos[qtd].altura <= 0) {
-        printf("\nValores inválidos! Cadastro cancelado.\n");
-        return qtd;
-    }
-
-    // Calcula o IMC e armazena
-    alunos[qtd].imc = calcularIMC(alunos[qtd].peso, alunos[qtd].altura);
-
-    printf("\nAluno cadastrado com sucesso!\n");
-    return qtd + 1; // retorna o novo total de alunos
-}
-
-// Função que lista todos os alunos cadastrados
-void listarAlunos(struct Aluno alunos[], int qtd) {
-    if (qtd == 0) {
-        printf("\nNenhum aluno cadastrado ainda.\n");
-        return;
-    }
-
-    printf("\n=== Lista de Alunos ===\n");
-    for (int i = 0; i < qtd; i++) {
-        printf("%d. %s - Idade: %d - IMC: %.2f",
-               i + 1, alunos[i].nome, alunos[i].idade, alunos[i].imc);
-        mostrarStatus(alunos[i].imc); // mostra o status do IMC
-    }
-}
-
-// Função principal (main)
 int main() {
-    struct Aluno alunos[100]; // vetor de alunos
-    int qtd = 0;              // quantidade de alunos cadastrados
-    int opcao;                // opção do menu
+    struct Aluno alunos[100];
+    int qtd = 0;
+    int opcao;
 
-    // Loop principal do menu
     do {
         printf("\n===== MENU PRINCIPAL =====\n");
         printf("1 - Cadastrar Aluno\n");
@@ -101,22 +44,60 @@ int main() {
         printf("3 - Sair\n");
         printf("Escolha uma opcao: ");
         scanf("%d", &opcao);
+        getchar(); // <-- limpa ENTER do menu
 
-        // Escolha da ação conforme a opção
         switch (opcao) {
             case 1:
-                qtd = cadastrarAluno(alunos, qtd);
+                if (qtd < 100) {
+                    printf("\n=== Cadastro de Aluno ===\n");
+
+                    printf("Nome: ");
+                    scanf(" %[^\n]", alunos[qtd].nome); 
+
+                    printf("Idade: ");
+                    scanf("%d", &alunos[qtd].idade);
+
+                    printf("Peso (kg): ");
+                    scanf("%f", &alunos[qtd].peso);
+
+                    printf("Altura (m): ");
+                    scanf("%f", &alunos[qtd].altura);
+
+                    if (alunos[qtd].peso > 0 && alunos[qtd].altura > 0) {
+                        alunos[qtd].imc = calcularIMC(alunos[qtd].peso, alunos[qtd].altura);
+                        printf("\nAluno cadastrado com sucesso!\n");
+                        qtd++;
+                    } else {
+                        printf("\nValores inválidos! Cadastro cancelado.\n");
+                    }
+                } else {
+                    printf("\nLimite de alunos atingido!\n");
+                }
                 break;
+
             case 2:
-                listarAlunos(alunos, qtd);
+                if (qtd == 0)
+                    printf("\nNenhum aluno cadastrado ainda.\n");
+                else {
+                    printf("\n=== Lista de Alunos ===\n");
+                    for (int i = 0; i < qtd; i++) {
+                        printf("%d. %s - Idade: %d - IMC: %.2f",
+                               i + 1, alunos[i].nome, alunos[i].idade, alunos[i].imc);
+                        mostrarStatus(alunos[i].imc);
+                    }
+                }
                 break;
+
             case 3:
                 printf("\nEncerrando o programa...\n");
                 break;
+
             default:
                 printf("\nOpcao invalida! Tente novamente.\n");
         }
-    } while (opcao != 3); // repete até escolher sair
+
+    } while (opcao != 3); // Encerra o loop
+    
 
     return 0;
 }
