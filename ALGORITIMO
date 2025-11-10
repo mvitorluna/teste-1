@@ -41,7 +41,8 @@ int main() {
         printf("\n===== MENU PRINCIPAL =====\n");
         printf("1 - Cadastrar Aluno\n");
         printf("2 - Listar Alunos\n");
-        printf("3 - Sair\n");
+        printf("3 - Apagar Aluno\n"); 
+        printf("4 - Sair\n");
         printf("Escolha uma opcao: ");
         scanf("%d", &opcao);
         getchar(); // <-- limpa ENTER do menu
@@ -89,6 +90,27 @@ int main() {
                 break;
 
             case 3:
+                if (qtd == 0) {
+                    printf("\nNenhum aluno cadastrado para apagar.\n");
+                } else {
+                    int num;
+                    printf("\nDigite o número do aluno que deseja apagar (1 a %d): ", qtd);
+                    scanf("%d", &num);
+
+                    if (num < 1 || num > qtd) {
+                        printf("\nNúmero inválido!\n");
+                    } else {
+                        // Move todos os alunos seguintes uma posição para trás
+                        for (int i = num - 1; i < qtd - 1; i++) {
+                            alunos[i] = alunos[i + 1];
+                        }
+                        qtd--; // reduz a contagem total
+                        printf("\nAluno apagado com sucesso!\n");
+                    }
+                }
+                break;
+
+            case 4:
                 printf("\nEncerrando o programa...\n");
                 break;
 
@@ -96,7 +118,7 @@ int main() {
                 printf("\nOpcao invalida! Tente novamente.\n");
         }
 
-    } while (opcao != 3); // Encerra o loop
+    } while (opcao != 4); // Encerra o loop
     
 
     return 0;
